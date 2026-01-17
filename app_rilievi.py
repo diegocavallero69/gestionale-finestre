@@ -11,7 +11,6 @@ from datetime import datetime
 st.set_page_config(page_title="Rilievi Finestre", page_icon="🪟", layout="wide")
 
 # --- FUNZIONI DI UTILITÀ (PDF) ---
-
 def genera_pdf(dati_testata, df_misure):
     buffer = io.BytesIO()
     c = canvas.Canvas(buffer, pagesize=A4)
@@ -106,14 +105,12 @@ def genera_pdf(dati_testata, df_misure):
             # --- RIGA DETTAGLI ---
             dettagli = []
             
-            # Accessori
             acc = []
             if row.get("Porta"): acc.append("PORTA")
             if row.get("Serratura"): acc.append("SERR.")
             if row.get("Altezza maniglia"): acc.append(f"H.Man:{row['Altezza maniglia']}")
             if acc: dettagli.append(" ".join(acc))
             
-            # Coprifili (Stampiamo solo se hanno valori > 0)
             cop = []
             keys_cop = {
                 "coprifilo interno": "Int", "coprifilo esterno": "Est",
@@ -128,13 +125,14 @@ def genera_pdf(dati_testata, df_misure):
             
             if cop: dettagli.append(f"COP: {', '.join(cop)}")
             
-            # Oscuranti
             osc = []
             if row.get("zanzariera incasso"): osc.append("ZANZ.INC")
             if row.get("L_Zanzariera") or row.get("H_Zanzariera"): 
                 osc.append(f"Zanz:{row.get('L_Zanzariera','')}x{row.get('H_Zanzariera','')}")
             if row.get("L_Oscurante") or row.get("H_Oscurante"):
                 osc.append(f"Osc:{row.get('L_Oscurante','')}x{row.get('H_Oscurante','')}")
+            if row.get("note oscurante"):
+                osc.append(f"Note Osc:{row.get('note oscurante')}")
             
             if osc: dettagli.append(" ".join(osc))
             
@@ -156,9 +154,35 @@ def genera_pdf(dati_testata, df_misure):
     buffer.seek(0)
     return buffer
 
-# --- GESTIONE STATO ---
+# --- GESTIONE STATO INIZIALE (Session State) ---
+# Questo è il trucco per non perdere i dati!
 if 'dati_caricati' not in st.session_state:
-    st.session_state['dati_caricati'] = None
+    st.session_state['dati_caricati'] = {}
+
+# Definisco TUTTE le colonne possibili subito, così non crasha se nascondi/mostri
+ALL_COLUMNS = [
+    "Posizione", "Forma", "Nr ante", "Larghezza (L)", "Altezza (H)", "Altezza (arco trapezio) (H1)",
+    "Qtà", "Apertura", "Battuta", "Porta", "Serratura", "Altezza maniglia", "Note",
+    "coprifilo interno", "coprifilo esterno",
+    "coprifilo interno INF", "coprifilo esterno INF", 
+    "coprifilo interno DX", "coprifilo esterno DX",
+    "coprifilo aggiuntivo L", "coprifilo aggiuntivo H",
+    "zanzariera incasso", "L_Zanzariera", "H_Zanzariera",
+    "L_Oscurante", "H_Oscurante", "note oscurante"
+]
+
+if 'df_misure' not in st.session_state:
+    # Creo il DataFrame iniziale con TUTTE le colonne a 0 o vuote
+    df_start = pd.DataFrame(columns=ALL_COLUMNS)
+    # Aggiungo la riga di esempio
+    first_row = {col: 0 for col in ALL_COLUMNS}
+    first_row.update({
+        "Posizione": "Cucina", "Forma": "Rettangolare", "Nr ante": 1, 
+        "Larghezza (L)": 1200, "Altezza (H)": 1400, "Qtà": 1, "Apertura": "DKD", 
+        "Battuta": "15x40 Lat/sup", "Porta": False, "Serratura": False, "Note": "",
+        "zanzariera incasso": False, "note oscurante": ""
+    })
+    st.session_state['df_misure'] = pd.DataFrame([first_row])
 
 # --- SIDEBAR (CARICAMENTO) ---
 with st.sidebar:
@@ -168,17 +192,25 @@ with st.sidebar:
         try:
             dati_json = json.load(uploaded_file)
             st.session_state['dati_caricati'] = dati_json
+            # IMPORTANTE: Quando carico un file, aggiorno anche il DataFrame in sessione
+            if 'misure' in dati_json:
+                df_loaded = pd.DataFrame(dati_json['misure'])
+                # Mi assicuro che abbia tutte le colonne, anche quelle vuote
+                for col in ALL_COLUMNS:
+                    if col not in df_loaded.columns:
+                        df_loaded[col] = False if "zanzariera" in col or "Porta" in col or "Serratura" in col else 0
+                st.session_state['df_misure'] = df_loaded
             st.success("Dati caricati!")
+            st.rerun() # Ricarica la pagina per mostrare i dati
         except:
             st.error("File non valido.")
 
 # --- INTERFACCIA PRINCIPALE ---
 st.title("🪟 Gestionale Rilievi Serramenti")
 
-d = st.session_state['dati_caricati'] if st.session_state['dati_caricati'] else {}
+d = st.session_state['dati_caricati']
 
 # === SEZIONE 1: INPUT DATI (COLLASSABILE) ===
-# Qui mettiamo tutto dentro un expander per nasconderlo
 with st.expander("📝 1. Anagrafica e 2. Specifiche Tecniche (Clicca per Aprire/Chiudere)", expanded=False):
     
     col_anag1, col_anag2 = st.columns(2)
@@ -188,7 +220,7 @@ with st.expander("📝 1. Anagrafica e 2. Specifiche Tecniche (Clicca per Aprire
         indirizzo = st.text_input("Indirizzo", value=d.get("indirizzo", ""))
         commessa = st.text_input("Commessa", value=d.get("commessa", ""))
     with col_anag2:
-        st.write("") # Spaziatore
+        st.write("") 
         st.write("") 
         telefono = st.text_input("Telefono", value=d.get("telefono", ""))
         email = st.text_input("Email", value=d.get("email", ""))
@@ -207,13 +239,11 @@ with st.expander("📝 1. Anagrafica e 2. Specifiche Tecniche (Clicca per Aprire
     c1, c2, c3 = st.columns(3)
     
     with c1:
-        # MATERIALE
         mat_options = ["Legno Estia", "Legno Clima80", "Legno alluminio Innova", "Legno alluminio Essential", "Legno alluminio Evo 2.0"]
         saved_mat = d.get("tipo_mat", mat_options[0])
         idx_mat = mat_options.index(saved_mat) if saved_mat in mat_options else 0
         tipo_mat = st.selectbox("Materiale", mat_options, index=idx_mat)
         
-        # COLORE ALLUMINIO
         colore_alluminio = ""
         if "alluminio" in tipo_mat.lower():
             opt_alluminio = ["Bianco 9010", "Avorio 1013", "Grigio seta 7044", "Ciliegio", "Ral da definire"]
@@ -221,31 +251,27 @@ with st.expander("📝 1. Anagrafica e 2. Specifiche Tecniche (Clicca per Aprire
             idx_alu = opt_alluminio.index(saved_alu) if saved_alu in opt_alluminio else 0
             colore_alluminio = st.selectbox("Colore Alluminio Esterno", opt_alluminio, index=idx_alu)
         
-        # VETRO
         opt_vet = ["Doppio", "Triplo"]
         saved_vet = d.get("vetro", opt_vet[0])
         idx_vet = opt_vet.index(saved_vet) if saved_vet in opt_vet else 0
         vetro = st.selectbox("Vetro", opt_vet, index=idx_vet)
 
     with c2:
-        # LEGNO
         opt_legno = ["Pino lista intera", "Pino finger joint", "Red Grandis", "Larice", "Castagno", "Rovere"]
         saved_legno = d.get("essenza_legno", opt_legno[0])
         idx_legno = opt_legno.index(saved_legno) if saved_legno in opt_legno else 0
         essenza_legno = st.selectbox("Essenza Legno", opt_legno, index=idx_legno)
         
-        # FINITURE
         opt_finitura = ["Noce", "Noce chiaro", "Noce scuro", "Pino scuro", "Ral 9010", "Ral 1013", "Ral 7044"]
         saved_finitura = d.get("finitura_legno", opt_finitura[0])
         idx_finitura = opt_finitura.index(saved_finitura) if saved_finitura in opt_finitura else 0
         finitura_legno = st.selectbox("Finitura Esterna", opt_finitura, index=idx_finitura)
         
-        saved_fin_int = d.get("finitura_interna_legno", opt_finitura[0]) # Default same list
+        saved_fin_int = d.get("finitura_interna_legno", opt_finitura[0])
         idx_fin_int = opt_finitura.index(saved_fin_int) if saved_fin_int in opt_finitura else 0
         finitura_interna_legno = st.selectbox("Finitura Interna", opt_finitura, index=idx_fin_int)
 
     with c3:
-        # MANIGLIA E ACCESSORI
         opt_maniglia = ["Glasgow", "Berna", "Bordeaux", "Brera", "Lisbona"]
         saved_maniglia = d.get("maniglia", opt_maniglia[0])
         idx_maniglia = opt_maniglia.index(saved_maniglia) if saved_maniglia in opt_maniglia else 0
@@ -283,19 +309,19 @@ with st.expander("📝 1. Anagrafica e 2. Specifiche Tecniche (Clicca per Aprire
 st.markdown("---")
 st.subheader("3. Misure e Quantità")
 
-# 1. Recupero o Inizializzazione DataFrame
-if 'misure' in d:
-    df_iniziale = pd.DataFrame(d['misure'])
-else:
-    df_iniziale = pd.DataFrame(
-        [{"Posizione": "Cucina", "Forma": "Rettangolare", "Nr ante": 1, 
-          "Larghezza (L)": 1200, "Altezza (H)": 1400, "Qtà": 1, "Apertura": "DKD", 
-          "Battuta": "15x40 Lat/sup", "Porta": False, "Serratura": False, "Note": ""}]
-    )
+# 3. INTERRUTTORI VISIBILITÀ (Senza perdere dati)
+c_check1, c_check2 = st.columns(2)
+show_coprifili = c_check1.checkbox("Mostra Varianti Coprifili", value=False)
+show_oscuranti = c_check2.checkbox("Mostra Dettagli Oscuranti/Zanz", value=False)
 
-# 2. DEFINIZIONE DELLE COLONNE AVANZATE
-# Importante: Definisco quali colonne sono "Extra". 
-# Se non esistono nel DF, le creo a 0 per evitare che spariscano.
+# 4. DEFINIZIONE ORDINE COLONNE
+# Base
+column_order = [
+    "Posizione", "Forma", "Nr ante", "Larghezza (L)", "Altezza (H)", "Altezza (arco trapezio) (H1)",
+    "Qtà", "Apertura", "Battuta", "Porta", "Serratura", "Altezza maniglia", "Note"
+]
+
+# Aggiunte dinamiche
 extra_cols_coprifili = [
     "coprifilo interno", "coprifilo esterno",
     "coprifilo interno INF", "coprifilo esterno INF", 
@@ -307,33 +333,9 @@ extra_cols_oscuranti = [
     "L_Oscurante", "H_Oscurante", "note oscurante"
 ]
 
-# Inizializzo le colonne a 0/None se mancano (così l'editor non si rompe)
-for col in extra_cols_coprifili + extra_cols_oscuranti:
-    if col not in df_iniziale.columns:
-        if "zanzariera incasso" in col:
-            df_iniziale[col] = False
-        elif "note" in col:
-            df_iniziale[col] = ""
-        else:
-            df_iniziale[col] = 0
-
-# 3. INTERRUTTORI VISIBILITÀ
-c_check1, c_check2 = st.columns(2)
-show_coprifili = c_check1.checkbox("Mostra Varianti Coprifili", value=False)
-show_oscuranti = c_check2.checkbox("Mostra Dettagli Oscuranti/Zanz", value=False)
-
-# 4. DEFINIZIONE ORDINE COLONNE (Questo fa la magia del nascondi/mostra)
-column_order = [
-    "Posizione", "Forma", "Nr ante", "Larghezza (L)", "Altezza (H)", "Altezza (arco trapezio) (H1)",
-    "Qtà", "Apertura", "Battuta", "Porta", "Serratura", "Altezza maniglia", "Note"
-]
-
 if show_coprifili:
-    # Aggiungo i coprifili all'ordine visualizzato
     column_order.extend(extra_cols_coprifili)
-
 if show_oscuranti:
-    # Aggiungo oscuranti all'ordine visualizzato
     column_order.extend(extra_cols_oscuranti)
 
 # 5. CONFIGURAZIONE EDITOR
@@ -352,7 +354,7 @@ col_config = {
     "Altezza maniglia": st.column_config.NumberColumn("H.Man", format="%d", width="small"),
     "Note": st.column_config.TextColumn("Note", width="large"),
     
-    # Colonne Extra (Configurate ma visibili solo se in column_order)
+    # Colonne Extra (Sempre configurate, ma mostrate solo se in column_order)
     "coprifilo interno": st.column_config.NumberColumn("Cop.Int", format="%d"),
     "coprifilo esterno": st.column_config.NumberColumn("Cop.Est", format="%d"),
     "coprifilo interno INF": st.column_config.NumberColumn("C.Int.INF", format="%d"),
@@ -370,15 +372,18 @@ col_config = {
     "note oscurante": st.column_config.TextColumn("Note Osc"),
 }
 
-# 6. VISUALIZZAZIONE EDITOR
-misure_df = st.data_editor(
-    df_iniziale,
-    column_order=column_order, # <--- QUESTO è il trucco per nascondere/mostrare
+# 6. VISUALIZZAZIONE EDITOR (Legato al Session State)
+# Il dataframe viene letto e scritto direttamente nel session state
+st.session_state['df_misure'] = st.data_editor(
+    st.session_state['df_misure'], # <--- PUNTO CHIAVE: Uso i dati salvati
+    column_order=column_order,
     column_config=col_config,
     num_rows="dynamic",
     use_container_width=True,
     hide_index=True
 )
+
+misure_df = st.session_state['df_misure']
 
 # Validazione errori
 errori = []
@@ -398,6 +403,7 @@ st.markdown("---")
 # === BOTTONI (ZONA BASSA) ===
 c_sx, c_cnt, c_dx = st.columns(3)
 
+# Aggiorno il dizionario per il salvataggio
 dati_completi = {
     "cliente": cliente, "indirizzo": indirizzo, "commessa": commessa,
     "telefono": telefono, "email": email,
@@ -416,7 +422,7 @@ dati_completi = {
     "nrCentrali": nrCentrali,
     "HCentrale1": HCentrale1, "HCentrale2": HCentrale2, "HCentrale3": HCentrale3,
     "note_generali": note_generali,
-    "misure": misure_df.to_dict('records')
+    "misure": misure_df.to_dict('records') # Salvo i dati attuali della tabella
 }
 
 json_str = json.dumps(dati_completi, indent=4)
