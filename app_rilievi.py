@@ -155,11 +155,10 @@ def genera_pdf(dati_testata, df_misure):
     return buffer
 
 # --- GESTIONE STATO INIZIALE (Session State) ---
-# Questo è il trucco per non perdere i dati!
 if 'dati_caricati' not in st.session_state:
     st.session_state['dati_caricati'] = {}
 
-# Definisco TUTTE le colonne possibili subito, così non crasha se nascondi/mostri
+# Definisco TUTTE le colonne possibili subito
 ALL_COLUMNS = [
     "Posizione", "Forma", "Nr ante", "Larghezza (L)", "Altezza (H)", "Altezza (arco trapezio) (H1)",
     "Qtà", "Apertura", "Battuta", "Porta", "Serratura", "Altezza maniglia", "Note",
@@ -172,9 +171,7 @@ ALL_COLUMNS = [
 ]
 
 if 'df_misure' not in st.session_state:
-    # Creo il DataFrame iniziale con TUTTE le colonne a 0 o vuote
     df_start = pd.DataFrame(columns=ALL_COLUMNS)
-    # Aggiungo la riga di esempio
     first_row = {col: 0 for col in ALL_COLUMNS}
     first_row.update({
         "Posizione": "Cucina", "Forma": "Rettangolare", "Nr ante": 1, 
@@ -192,16 +189,14 @@ with st.sidebar:
         try:
             dati_json = json.load(uploaded_file)
             st.session_state['dati_caricati'] = dati_json
-            # IMPORTANTE: Quando carico un file, aggiorno anche il DataFrame in sessione
             if 'misure' in dati_json:
                 df_loaded = pd.DataFrame(dati_json['misure'])
-                # Mi assicuro che abbia tutte le colonne, anche quelle vuote
                 for col in ALL_COLUMNS:
                     if col not in df_loaded.columns:
                         df_loaded[col] = False if "zanzariera" in col or "Porta" in col or "Serratura" in col else 0
                 st.session_state['df_misure'] = df_loaded
             st.success("Dati caricati!")
-            st.rerun() # Ricarica la pagina per mostrare i dati
+            st.rerun()
         except:
             st.error("File non valido.")
 
@@ -309,32 +304,37 @@ with st.expander("📝 1. Anagrafica e 2. Specifiche Tecniche (Clicca per Aprire
 st.markdown("---")
 st.subheader("3. Misure e Quantità")
 
-# 3. INTERRUTTORI VISIBILITÀ (Senza perdere dati)
-c_check1, c_check2 = st.columns(2)
-show_coprifili = c_check1.checkbox("Mostra Varianti Coprifili", value=False)
-show_oscuranti = c_check2.checkbox("Mostra Dettagli Oscuranti/Zanz", value=False)
+# 3. INTERRUTTORI VISIBILITÀ (CON SESSION STATE PER NON PERDERE DATI)
+c_check1, c_check2, c_check3 = st.columns(3)
+show_battute = c_check1.checkbox("Mostra Battute", value=False) # NUOVA CHECKBOX
+show_coprifili = c_check2.checkbox("Mostra Varianti Coprifili", value=False)
+show_oscuranti = c_check3.checkbox("Mostra Dettagli Oscuranti/Zanz", value=False)
 
 # 4. DEFINIZIONE ORDINE COLONNE
-# Base
+# Base (Modificata: Battuta tolta, Coprifili Base aggiunti)
 column_order = [
     "Posizione", "Forma", "Nr ante", "Larghezza (L)", "Altezza (H)", "Altezza (arco trapezio) (H1)",
-    "Qtà", "Apertura", "Battuta", "Porta", "Serratura", "Altezza maniglia", "Note"
+    "Qtà", "Apertura", "Porta", "Serratura", "Altezza maniglia", "Note",
+    "coprifilo interno", "coprifilo esterno",       # <--- ORA SEMPRE VISIBILI
+    "coprifilo interno INF", "coprifilo esterno INF"# <--- ORA SEMPRE VISIBILI
 ]
 
-# Aggiunte dinamiche
-extra_cols_coprifili = [
-    "coprifilo interno", "coprifilo esterno",
-    "coprifilo interno INF", "coprifilo esterno INF", 
+# Colonne dinamiche
+if show_battute:
+    column_order.insert(8, "Battuta") # Inserisco "Battuta" dopo Apertura
+
+extra_cols_coprifili_avanzati = [
     "coprifilo interno DX", "coprifilo esterno DX",
     "coprifilo aggiuntivo L", "coprifilo aggiuntivo H"
 ]
+
 extra_cols_oscuranti = [
     "zanzariera incasso", "L_Zanzariera", "H_Zanzariera",
     "L_Oscurante", "H_Oscurante", "note oscurante"
 ]
 
 if show_coprifili:
-    column_order.extend(extra_cols_coprifili)
+    column_order.extend(extra_cols_coprifili_avanzati)
 if show_oscuranti:
     column_order.extend(extra_cols_oscuranti)
 
@@ -354,16 +354,19 @@ col_config = {
     "Altezza maniglia": st.column_config.NumberColumn("H.Man", format="%d", width="small"),
     "Note": st.column_config.TextColumn("Note", width="large"),
     
-    # Colonne Extra (Sempre configurate, ma mostrate solo se in column_order)
-    "coprifilo interno": st.column_config.NumberColumn("Cop.Int", format="%d"),
-    "coprifilo esterno": st.column_config.NumberColumn("Cop.Est", format="%d"),
-    "coprifilo interno INF": st.column_config.NumberColumn("C.Int.INF", format="%d"),
-    "coprifilo esterno INF": st.column_config.NumberColumn("C.Est.INF", format="%d"),
+    # COPRIFILI BASE (SEMPRE VISIBILI ORA)
+    "coprifilo interno": st.column_config.NumberColumn("Cop.Int", format="%d", width="small"),
+    "coprifilo esterno": st.column_config.NumberColumn("Cop.Est", format="%d", width="small"),
+    "coprifilo interno INF": st.column_config.NumberColumn("C.Int.INF", format="%d", width="small"),
+    "coprifilo esterno INF": st.column_config.NumberColumn("C.Est.INF", format="%d", width="small"),
+    
+    # COPRIFILI AVANZATI
     "coprifilo interno DX": st.column_config.NumberColumn("C.Int.DX", format="%d"),
     "coprifilo esterno DX": st.column_config.NumberColumn("C.Est.DX", format="%d"),
     "coprifilo aggiuntivo L": st.column_config.NumberColumn("C.Agg.L", format="%d"),
     "coprifilo aggiuntivo H": st.column_config.NumberColumn("C.Agg.H", format="%d"),
     
+    # OSCURANTI
     "zanzariera incasso": st.column_config.CheckboxColumn("Zanz.Inc", default=False),
     "L_Zanzariera": st.column_config.NumberColumn("L.Zanz", format="%d"),
     "H_Zanzariera": st.column_config.NumberColumn("H.Zanz", format="%d"),
@@ -373,9 +376,8 @@ col_config = {
 }
 
 # 6. VISUALIZZAZIONE EDITOR (Legato al Session State)
-# Il dataframe viene letto e scritto direttamente nel session state
 st.session_state['df_misure'] = st.data_editor(
-    st.session_state['df_misure'], # <--- PUNTO CHIAVE: Uso i dati salvati
+    st.session_state['df_misure'],
     column_order=column_order,
     column_config=col_config,
     num_rows="dynamic",
@@ -403,7 +405,6 @@ st.markdown("---")
 # === BOTTONI (ZONA BASSA) ===
 c_sx, c_cnt, c_dx = st.columns(3)
 
-# Aggiorno il dizionario per il salvataggio
 dati_completi = {
     "cliente": cliente, "indirizzo": indirizzo, "commessa": commessa,
     "telefono": telefono, "email": email,
@@ -422,7 +423,7 @@ dati_completi = {
     "nrCentrali": nrCentrali,
     "HCentrale1": HCentrale1, "HCentrale2": HCentrale2, "HCentrale3": HCentrale3,
     "note_generali": note_generali,
-    "misure": misure_df.to_dict('records') # Salvo i dati attuali della tabella
+    "misure": misure_df.to_dict('records')
 }
 
 json_str = json.dumps(dati_completi, indent=4)
